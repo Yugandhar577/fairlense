@@ -1,6 +1,6 @@
 # FairLens
 
-FairLens is an educational, reproducible framework for comparing machine-learning performance and group fairness measurements on the UCI Adult Income dataset. It trains Logistic Regression, Decision Tree, and Random Forest classifiers, evaluates baseline and mitigated predictions, and presents precomputed results in a Streamlit dashboard.
+FairLens is an educational, reproducible framework for comparing machine-learning performance and group fairness measurements on the UCI Adult Income dataset. It trains Logistic Regression, Decision Tree, and Random Forest classifiers, evaluates baseline and mitigated predictions, and presents precomputed results in a React dashboard.
 
 FairLens is a benchmarking study, not a new learning algorithm or a system for making real-world decisions.
 
@@ -25,7 +25,8 @@ UCI Adult data
   → training-only mitigation / training-validation threshold selection
   → final evaluation on the untouched test split
   → CSV/JSON results store
-  → Streamlit dashboard
+  → read-only Python results service
+  → React dashboard
 ```
 
 The test split is not used to fit preprocessing, calculate reweighing weights, fit models, or select thresholds. For threshold adjustment, the training split is further divided into a model-fitting subset and a validation subset. The final test split is used only for evaluation.
@@ -50,13 +51,15 @@ These are distinct mathematical definitions and can lead to different conclusion
 
 ## Requirements and installation
 
-Python 3.11 is the project target. The current implementation has also been exercised with Python 3.13.
+Python 3.11 is the project target. The current implementation has also been exercised with Python 3.13. Building the frontend requires Node.js 22.12+ and npm. The frontend uses React, TypeScript, Vite, Recharts, Lucide icons, and locally bundled DM Sans fonts.
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
 ## Run the project
@@ -67,19 +70,48 @@ Run the offline benchmark to train models and regenerate the results:
 python run_pipeline.py
 ```
 
-Launch the dashboard after the pipeline has completed:
+Launch the dashboard after the pipeline has completed and the frontend has been built:
 
 ```powershell
-streamlit run dashboard/app.py
+python run_dashboard.py
 ```
 
-The dashboard reads the saved results and does not retrain models when opened. Its pages cover the overview, model performance, fairness analysis, mitigation comparison, cross-model comparison, and cross-group mitigation effects.
+Open **http://127.0.0.1:8000**. One Python process serves both the built React app and its read-only results API. Choose another local port with `python run_dashboard.py --port 8001`. Node is only needed to install/build or develop the frontend.
+
+The dashboard reads the saved results and does not retrain models when opened. Its pages cover the overview, model performance, fairness analysis, mitigation comparison, cross-model comparison, and cross-group mitigation effects, plus a methodology reference. Filters preserve their selections across pages. Charts are interactive; the accompanying tables expose exact values. The **Export results** menu downloads the generated CSVs, and **Refresh saved results** reloads the latest experiment.
+
+If results are absent or malformed, the dashboard explains how to regenerate them. Undefined values are displayed as undefined rather than zero. The configurable low-sample threshold is shown for small demographic groups.
+
+### Frontend development
+
+Run these commands in two terminals from the repository root:
+
+```powershell
+# Terminal 1: saved-results API
+python run_dashboard.py
+
+# Terminal 2: React development server, with hot reload
+npm --prefix frontend run dev
+```
+
+Open the URL printed by Vite (normally http://127.0.0.1:5173). Vite proxies `/api` requests to the Python service on port 8000. `npm --prefix frontend run build` performs a TypeScript check and creates the standalone frontend assets. To refresh the built dashboard after frontend edits, rebuild and reload the browser.
+
+The local API provides `GET /api/results` and `GET /api/export/<filename>` for the three metric CSVs. It does not execute training, load model binaries, or accept file uploads. It binds to localhost; external hosting and authentication are outside this local research app's scope.
 
 Run the tests with:
 
 ```powershell
 pytest
 ```
+
+Browser checks use the saved experiment files and a locally installed Google Chrome:
+
+```powershell
+npm --prefix frontend run build
+npm --prefix frontend run test:e2e
+```
+
+They exercise navigation, filters, CSV downloads, mobile layout, undefined values, and missing-results recovery. The test runner starts the local Python service if it is not already running.
 
 ## Results files
 
@@ -98,7 +130,7 @@ These generated outputs and model binaries are ignored by Git. Regenerate them l
 ## Project structure
 
 ```text
-dashboard/              Streamlit app, pages, and presentation helpers
+frontend/               React + TypeScript dashboard, styling, and interactive charts
 data/raw/               Local UCI Adult CSV (not tracked)
 data/processed/         Local derived data (not tracked)
 src/fairlens/           Configuration, data, models, metrics, mitigation, pipeline
@@ -106,8 +138,11 @@ results/                Generated metrics, run configuration, and model artifact
 tests/                  Preprocessing, fairness, and mitigation tests
 notebooks/              Exploratory work only
 run_pipeline.py         Offline experiment entry point
+run_dashboard.py        Local dashboard and results API entry point
 requirements.txt        Python dependencies
 ```
+
+The Streamlit implementation was replaced by React. The original PRD, FSD, and technical design remain in the repository as historical design documents; this README describes the current setup. Build outputs (`frontend/dist/`) and Node dependencies are ignored by Git; `frontend/package-lock.json` records the frontend dependency versions.
 
 ## Responsible AI and limitations
 

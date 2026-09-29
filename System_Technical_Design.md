@@ -1,5 +1,7 @@
 # System Technical Design Document
 
+> Implementation update: the original Streamlit presentation layer described below has been replaced by a React/TypeScript dashboard under `frontend/`. A read-only local service in `src/fairlens/dashboard_server.py`, launched with `python run_dashboard.py`, serves the saved metric files and built frontend. See `README.md` for current setup and API instructions. The batch experiment pipeline remains the source of dashboard measurements.
+
 ## FairLens: A Comparative Framework for Bias Detection and Mitigation in Machine Learning Models
 
 | | |
