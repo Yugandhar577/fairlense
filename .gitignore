@@ -1,0 +1,39 @@
+# Python bytecode and test/tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Streamlit secrets and local configuration
+.streamlit/secrets.toml
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local dataset and derived data (obtain Adult data from UCI; do not commit it)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Generated experiment outputs and trained model binaries
+results/*.csv
+results/*.json
+results/models/*
+!results/models/.gitkeep
