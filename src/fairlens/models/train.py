@@ -23,7 +23,11 @@ def build_model_instances(config: FairLensConfig) -> dict[str, Any]:
 def train_models(X_train: Any, y_train: Any, config: FairLensConfig,
                  sample_weight: Any | None = None) -> dict[str, Any]:
     """Fit fresh model instances using optional training-only sample weights."""
-    trained = build_model_instances(config)
+    available = build_model_instances(config)
+    unknown = set(config.models) - set(available)
+    if unknown:
+        raise ValueError(f"Unsupported Adult-study models: {sorted(unknown)}")
+    trained = {name: available[name] for name in config.models}
     for model in trained.values():
         if sample_weight is None:
             model.fit(X_train, y_train)

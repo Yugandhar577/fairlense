@@ -1,17 +1,18 @@
 import { defineConfig } from "@playwright/test";
+const workspaceDirectory = `../test-results/workspace-${Date.now()}`;
 
 export default defineConfig({
   testDir: "./e2e",
   workers: 1,
   use: {
-    baseURL: "http://127.0.0.1:8000",
+    baseURL: "http://127.0.0.1:8010",
     channel: "chrome",
     headless: true,
     viewport: { width: 1440, height: 1100 },
   },
   webServer: {
-    command: "python ../run_dashboard.py",
-    url: "http://127.0.0.1:8000",
-    reuseExistingServer: true,
+    command: `python ../run_dashboard.py --port 8010 --workspace-dir ${workspaceDirectory}`,
+    url: "http://127.0.0.1:8010",
+    reuseExistingServer: false,
   },
 });

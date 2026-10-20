@@ -1,20 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
-  ArrowRight,
   BookOpen,
   ChartNoAxesCombined,
-  ChevronRight,
   FlaskConical,
   GitCompareArrows,
   LayoutDashboard,
   Menu,
   RefreshCw,
   ScanLine,
-  ShieldCheck,
   X,
+  SlidersHorizontal,
 } from "lucide-react";
-import { DownloadMenu } from "./components";
+import { DownloadMenu, Select } from "./components";
+import Workbench from "./Workbench";
+import ExperimentResults from "./ExperimentResults";
+import {
+  workspaceRequest,
+  type ExperimentResult,
+  type Run,
+} from "./workspace-data";
 import {
   type FairnessKey,
   type PerformanceKey,
@@ -33,6 +38,7 @@ import {
 } from "./pages";
 
 const navigation = [
+  { key: "train", label: "Train models", icon: SlidersHorizontal },
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "performance", label: "Model performance", icon: Activity },
   { key: "fairness", label: "Fairness analysis", icon: ScanLine },
@@ -56,10 +62,18 @@ function Mark() {
 export default function App() {
   const [page, setPage] = useState(currentPage);
   const [menuOpen, setMenuOpen] = useState(false);
+  const sidebar = useRef<HTMLElement>(null);
   const [data, setData] = useState<Results | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [runId, setRunId] = useState(
+    () => localStorage.getItem("fairlens.selectedRun") || "",
+  );
+  const [experiment, setExperiment] = useState<ExperimentResult | null>(null);
+  const [experimentLoading, setExperimentLoading] = useState(false);
+  const [experimentError, setExperimentError] = useState("");
   const [model, setModel] = useState("logistic_regression");
   const [state, setState] = useState("baseline");
   const [attribute, setAttribute] = useState("gender");
@@ -92,6 +106,42 @@ export default function App() {
     document.title = `${titles[page][0]} · FairLens`;
   }, [page]);
   useEffect(() => {
+    if (!menuOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const links = () =>
+      Array.from(
+        sidebar.current?.querySelectorAll<HTMLElement>("a[href], button") || [],
+      );
+    links()[0]?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key !== "Tab") return;
+      const targets = links();
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    const onResize = () => {
+      if (window.innerWidth > 760) setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+      previousFocus?.focus();
+    };
+  }, [menuOpen]);
+  useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
@@ -112,6 +162,37 @@ export default function App() {
       });
     return () => controller.abort();
   }, [reload]);
+  useEffect(() => {
+    const controller = new AbortController();
+    workspaceRequest<{ runs: Run[] }>("runs", undefined, controller.signal)
+      .then((body) => setRuns(body.runs))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [reload]);
+  useEffect(() => {
+    localStorage.setItem("fairlens.selectedRun", runId);
+    setExperiment(null);
+    setExperimentError("");
+    if (!runId) {
+      setExperimentLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setExperimentLoading(true);
+    workspaceRequest<ExperimentResult>(
+      `runs/${runId}/results`,
+      undefined,
+      controller.signal,
+    )
+      .then(setExperiment)
+      .catch((e) => {
+        if (!controller.signal.aborted) setExperimentError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setExperimentLoading(false);
+      });
+    return () => controller.abort();
+  }, [runId, reload]);
   const navigate = (key: string) => {
     location.hash = key;
     setMenuOpen(false);
@@ -144,28 +225,30 @@ export default function App() {
         />
       )}
       <aside
+        id="workspace-navigation"
+        ref={sidebar}
         className={`sidebar ${menuOpen ? "open" : ""}`}
         aria-label="Workspace navigation"
       >
+        <button
+          className="icon-button navigation-close"
+          aria-label="Close navigation menu"
+          onClick={() => setMenuOpen(false)}
+        >
+          <X size={20} />
+        </button>
         <a
           className="brand"
           href="#overview"
           onClick={() => setMenuOpen(false)}
         >
           <Mark />
-          <span>
-            FairLens<span className="brand-dot">.</span>
-          </span>
+          <span>FairLens</span>
         </a>
-        <div className="workspace-tag">
-          <span className="workspace-avatar">F</span>
-          <div>
-            <strong>Research workspace</strong>
-            <small>Adult Income benchmark</small>
-          </div>
-        </div>
-        <span className="nav-section-label">ANALYSIS</span>
-        <nav>
+        <p className="workspace-context">
+          Model training & fairness benchmarks
+        </p>
+        <nav aria-label="Benchmark analysis">
           {navigation.map(({ key, label, icon: Icon }) => (
             <a
               key={key}
@@ -174,42 +257,29 @@ export default function App() {
               aria-current={page === key ? "page" : undefined}
               className={page === key ? "nav-active" : ""}
             >
-              <Icon size={18} />
+              <Icon size={18} aria-hidden="true" />
               <span>{label}</span>
-              {page === key && <span className="active-dot" />}
             </a>
           ))}
         </nav>
-        <span className="nav-section-label resources-label">RESOURCES</span>
-        <nav>
+        <nav className="resource-nav" aria-label="Study reference">
           <a
             href="#methodology"
             onClick={() => setMenuOpen(false)}
             aria-current={page === "methodology" ? "page" : undefined}
             className={page === "methodology" ? "nav-active" : ""}
           >
-            <BookOpen size={18} />
+            <BookOpen size={18} aria-hidden="true" />
             Methodology
           </a>
         </nav>
-        <div className="sidebar-bottom">
-          <div className="study-card">
-            <ShieldCheck size={20} />
-            <strong>Measure. Compare. Understand.</strong>
-            <p>A transparent perspective on responsible machine learning.</p>
-            <button onClick={() => navigate("methodology")}>
-              About this study <ArrowRight size={14} />
-            </button>
-          </div>
-          <div className="sidebar-footer">
-            <span className="status-dot" />
-            Local research environment<span>v1.0</span>
-          </div>
-        </div>
+        <p className="sidebar-note">
+          Train explicitly. Compare saved results without retraining.
+        </p>
       </aside>
-      <div className="main-shell">
+      <div className="main-shell" inert={menuOpen}>
         <header className="topbar">
-          <div className="breadcrumb">
+          <div className="workspace-heading">
             <button
               className="icon-button menu-toggle"
               onClick={() => setMenuOpen(!menuOpen)}
@@ -217,57 +287,108 @@ export default function App() {
                 menuOpen ? "Close navigation menu" : "Open navigation menu"
               }
               aria-expanded={menuOpen}
+              aria-controls="workspace-navigation"
             >
               {menuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <span>Workspace</span>
-            <ChevronRight size={13} />
-            <strong>{titles[page][0]}</strong>
+            <span>FairLens · Local research workspace</span>
           </div>
-          <div className="topbar-right">
-            <span className="saved-status">
-              <span className={`status-dot ${!data ? "inactive" : ""}`} />
-              {data
-                ? "Saved experiment"
-                : loading
-                  ? "Loading results"
-                  : "Results unavailable"}
-            </span>
-            <span className="avatar">FL</span>
-          </div>
+          <span className="result-source" role="status">
+            {(runId ? experimentLoading : loading)
+              ? "Loading saved results…"
+              : (runId ? experimentError : error)
+                ? "Results unavailable"
+                : (runId ? experiment?.config.created_at_utc : date)
+                  ? `Saved ${runId ? new Date(experiment!.config.created_at_utc).toLocaleDateString() : date}`
+                  : ""}
+          </span>
         </header>
         <main id="main-content" tabIndex={-1}>
           <div className="page-heading">
             <div>
-              <div className="eyebrow">
-                FAIRNESS BENCHMARKING <span>/</span> UCI ADULT
-              </div>
               <h1>{titles[page][0]}</h1>
-              <p>{titles[page][1]}</p>
+              <p>
+                {runId && page !== "train"
+                  ? `${experiment?.config.dataset_name || "Selected experiment"} · ${page === "effects" ? "Inspect mitigation effects across sensitive groups." : page === "performance" ? "Compare task-appropriate measurements on held-out test rows." : titles[page][1]}`
+                  : titles[page][1]}
+              </p>
             </div>
             <div className="heading-actions">
               <button
-                className={`icon-button refresh ${loading ? "spinning" : ""}`}
-                disabled={loading}
+                className="icon-button refresh"
+                disabled={runId ? experimentLoading : loading}
                 onClick={() => setReload((n) => n + 1)}
                 aria-label="Refresh saved results"
                 title="Refresh saved results"
               >
-                <RefreshCw size={16} />
+                <RefreshCw size={18} aria-hidden="true" />
               </button>
-              {data && <DownloadMenu />}
+              {page !== "train" &&
+                (runId
+                  ? experiment && (
+                      <DownloadMenu
+                        runId={runId}
+                        regression={experiment.config.task === "regression"}
+                      />
+                    )
+                  : data && <DownloadMenu />)}
             </div>
           </div>
-          {loading && !data ? (
+          <div className="results-picker">
+            <Select
+              label="Results to view"
+              value={runId}
+              options={{
+                "": "Original Adult study",
+                ...Object.fromEntries(
+                  runs
+                    .filter((r) => r.status === "completed")
+                    .map((r) => [
+                      r.id,
+                      `${r.dataset_name} · ${r.task} · ${r.id.slice(0, 8)}`,
+                    ]),
+                ),
+                ...(runId && !runs.some((r) => r.id === runId)
+                  ? { [runId]: "Selected experiment" }
+                  : {}),
+              }}
+              onChange={(id) => {
+                setRunId(id);
+                if (page === "train") navigate("overview");
+              }}
+            />
+          </div>
+          {page === "train" ? (
+            <Workbench
+              refreshKey={reload}
+              onRunsChange={setRuns}
+              onOpenRun={(id) => {
+                setRunId(id);
+                navigate("overview");
+              }}
+            />
+          ) : runId ? (
+            experimentLoading ? (
+              <p role="status">Loading experiment results…</p>
+            ) : experimentError ? (
+              <div role="alert" className="error-state">
+                <h2>Experiment results unavailable</h2>
+                <p>{experimentError}</p>
+                <button className="button" onClick={() => setRunId("")}>
+                  View original Adult study
+                </button>
+              </div>
+            ) : (
+              experiment && <ExperimentResults data={experiment} page={page} />
+            )
+          ) : loading && !data ? (
             <div className="loading-state" role="status">
-              <div className="loader" />
-              <h2>Opening your experiment</h2>
+              <h2>Loading saved results</h2>
               <p>Loading the saved benchmark measurements.</p>
             </div>
           ) : error ? (
             <div className="error-state" role="alert">
-              <DatabaseIcon />
-              <h2>Let’s bring in your results</h2>
+              <h2>Experiment results unavailable</h2>
               <p>{error}</p>
               <code>python run_pipeline.py</code>
               <button
@@ -307,25 +428,12 @@ export default function App() {
           ) : null}
           <footer className="main-footer">
             <span>
-              <ShieldCheck size={14} />
               For educational research. Metrics describe disparities, not
               universal fairness.
-            </span>
-            <span>
-              {date
-                ? `Experiment saved ${date}`
-                : "FairLens research workspace"}
             </span>
           </footer>
         </main>
       </div>
-    </div>
-  );
-}
-function DatabaseIcon() {
-  return (
-    <div className="empty-icon">
-      <FlaskConical size={30} />
     </div>
   );
 }

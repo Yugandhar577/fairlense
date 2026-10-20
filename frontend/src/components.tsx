@@ -95,23 +95,21 @@ export function Stat({
   label,
   value,
   detail,
-  icon,
   accent = false,
 }: {
   label: string;
   value: string;
   detail: string;
-  icon?: ReactNode;
   accent?: boolean;
 }) {
   return (
-    <div className={`stat-card ${accent ? "stat-accent" : ""}`}>
-      <div className="stat-top">
-        <span>{label}</span>
-        {icon}
-      </div>
-      <strong>{value}</strong>
-      <span className="stat-detail">{detail}</span>
+    <div className={`metric-value ${accent ? "metric-selected" : ""}`}>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      <dd className="metric-detail">
+        {detail}
+        {accent ? " · Selected metric" : ""}
+      </dd>
     </div>
   );
 }
@@ -143,7 +141,10 @@ export function Empty({ children }: { children: ReactNode }) {
     </div>
   );
 }
-export function DownloadMenu() {
+export function DownloadMenu({
+  runId,
+  regression = false,
+}: { runId?: string; regression?: boolean } = {}) {
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const closeOnOutside = (event: PointerEvent) => {
@@ -169,12 +170,21 @@ export function DownloadMenu() {
       <div className="download-options">
         {[
           ["performance_metrics.csv", "Performance metrics"],
-          ["fairness_metrics.csv", "Fairness measurements"],
-          ["fairness_changes.csv", "Mitigation changes"],
+          ...(regression
+            ? [["group_errors.csv", "Group regression errors"]]
+            : [
+                ["fairness_metrics.csv", "Fairness measurements"],
+                ["fairness_changes.csv", "Mitigation changes"],
+              ]),
+          ...(runId ? [["run_config.json", "Run configuration"]] : []),
         ].map(([file, label]) => (
           <a
             key={file}
-            href={`/api/export/${file}`}
+            href={
+              runId
+                ? `/api/workspace/runs/${runId}/export/${file}`
+                : `/api/export/${file}`
+            }
             download={file}
             onClick={() => {
               if (menu.current) menu.current.open = false;
@@ -189,12 +199,11 @@ export function DownloadMenu() {
   );
 }
 
-const axis = { fontSize: 11, fill: "#7b8581" };
+const axis = { fontSize: 12, fill: "#52615b" };
 const tooltipStyle = {
-  borderRadius: 10,
-  border: "1px solid #e4e8e4",
-  fontSize: 12,
-  boxShadow: "0 8px 32px #14232112",
+  borderRadius: 4,
+  border: "1px solid #cbd3ce",
+  fontSize: 13,
 };
 export function Bars({
   data,
@@ -444,6 +453,40 @@ export function Tradeoff({
           ? "Higher ratio is closer to 1"
           : "Lower disparity is closer to 0"}
       </p>
+      <details className="chart-data">
+        <summary>View plotted measurements</summary>
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="Plotted measurements"
+          tabIndex={0}
+        >
+          <table>
+            <caption className="sr-only">
+              {performanceNames[performanceMetric]} and {metricNames[metric]}{" "}
+              for each plotted experiment
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Model</th>
+                <th scope="col">Experiment state</th>
+                <th scope="col">{performanceNames[performanceMetric]}</th>
+                <th scope="col">{metricNames[metric]}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {points.map((point) => (
+                <tr key={`${point.model}-${point.mitigation_state}`}>
+                  <th scope="row">{modelNames[point.model]}</th>
+                  <td>{stateNames[point.mitigation_state]}</td>
+                  <td>{format(point[performanceMetric], true)}</td>
+                  <td>{format(point.disparity)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </>
   );
 }
@@ -456,8 +499,16 @@ export function GroupTable({
   threshold: number;
 }) {
   return (
-    <div className="table-scroll">
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label="Group-level measurements"
+      tabIndex={0}
+    >
       <table>
+        <caption className="sr-only">
+          Sample counts and prediction rates for each demographic group
+        </caption>
         <thead>
           <tr>
             <th>Demographic group</th>

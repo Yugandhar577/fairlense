@@ -14,6 +14,7 @@ node_modules/
 *.tsbuildinfo
 playwright-report/
 test-results/
+.playwright-mcp/
 
 # Virtual environments and local environment files
 .venv/
@@ -44,3 +45,6 @@ results/*.csv
 results/*.json
 results/models/*
 !results/models/.gitkeep
+
+# Uploaded datasets and isolated local training runs (may contain sensitive data)
+workspace/

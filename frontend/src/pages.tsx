@@ -1,12 +1,4 @@
-import {
-  ArrowRight,
-  Database,
-  GitCompareArrows,
-  Layers3,
-  ScanLine,
-  FlaskConical,
-  Info,
-} from "lucide-react";
+import { ArrowRight, ScanLine, Info } from "lucide-react";
 import {
   Bars,
   Effect,
@@ -50,13 +42,17 @@ export interface Selection {
 }
 type Props = { data: Results; selection: Selection };
 export const titles: Record<string, [string, string]> = {
+  train: [
+    "Train models",
+    "Upload a dataset, configure compatible models, and run an isolated benchmark.",
+  ],
   overview: [
     "Experiment overview",
-    "Explore the balance between predictive performance and demographic fairness.",
+    "Compare saved model predictions, group disparities, and mitigation outcomes.",
   ],
   performance: [
     "Model performance",
-    "Five performance measures. Three models. One shared test set.",
+    "Compare accuracy, precision, recall, F1, and ROC-AUC on the shared test set.",
   ],
   fairness: [
     "Fairness analysis",
@@ -195,40 +191,84 @@ export function Overview({
   ).length;
   return (
     <>
-      <div className="stats-grid">
-        <Stat
-          label="Dataset records"
-          value={report.input_rows.toLocaleString()}
-          detail="UCI Adult · 1994 US Census"
-          icon={<Database size={18} />}
-        />
-        <Stat
-          label="Model families"
-          value={String(baselines.length).padStart(2, "0")}
-          detail="A shared evaluation protocol"
-          icon={<Layers3 size={18} />}
-        />
-        <Stat
-          label="Sensitive views"
-          value={String(
-            new Set(data.fairness.map((row) => row.sensitive_attribute)).size,
-          ).padStart(2, "0")}
-          detail="Including gender × age"
-          icon={<ScanLine size={18} />}
-        />
-        <Stat
-          label="Experiment arms"
-          value={String(data.performance.length).padStart(2, "0")}
-          detail="Baseline + two interventions"
-          icon={<GitCompareArrows size={18} />}
-          accent
-        />
-      </div>
+      <dl className="experiment-context" aria-label="Experiment context">
+        <div>
+          <dt>Dataset</dt>
+          <dd>
+            UCI Adult · {report.input_rows.toLocaleString()} source records
+          </dd>
+        </div>
+        <div>
+          <dt>Training / test</dt>
+          <dd>
+            {report.training_samples.toLocaleString()} /{" "}
+            {report.test_samples.toLocaleString()} samples
+          </dd>
+        </div>
+        <div>
+          <dt>Experiment scope</dt>
+          <dd>
+            {baselines.length} models · {data.performance.length}{" "}
+            model–intervention combinations
+          </dd>
+        </div>
+      </dl>
+      <Panel
+        title="Baseline benchmark"
+        subtitle="Saved test-set measurements before mitigation."
+        action={
+          <button className="text-link" onClick={() => navigate("models")}>
+            Compare models <ArrowRight size={15} aria-hidden="true" />
+          </button>
+        }
+      >
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="Baseline benchmark"
+          tabIndex={0}
+        >
+          <table>
+            <caption className="sr-only">
+              Baseline model performance and gender demographic parity
+              differences
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Model</th>
+                <th scope="col">Accuracy</th>
+                <th scope="col">F1 score</th>
+                <th scope="col">ROC-AUC</th>
+                <th scope="col">Gender DP difference</th>
+              </tr>
+            </thead>
+            <tbody>
+              {baselines.map((row) => (
+                <tr key={row.model}>
+                  <th scope="row">{modelNames[row.model]}</th>
+                  <td>{format(row.accuracy, true)}</td>
+                  <td>{format(row.f1)}</td>
+                  <td>{format(row.roc_auc)}</td>
+                  <td>
+                    {format(
+                      data.fairness.find(
+                        (f) =>
+                          f.model === row.model &&
+                          f.mitigation_state === "baseline" &&
+                          f.sensitive_attribute === "gender",
+                      )?.demographic_parity_diff,
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
       <div className="overview-columns">
         <Panel
-          title="Performance meets fairness"
+          title="Accuracy and group disparity"
           subtitle="Each point is a model and mitigation combination."
-          action={<span className="badge">Test-set results</span>}
         >
           <div className="compact-filters">
             <Select
@@ -251,33 +291,19 @@ export function Overview({
           />
         </Panel>
         <Panel
-          title="Experiment at a glance"
-          subtitle="A reproducible Adult Income case study."
+          title="Experiment configuration"
+          subtitle="Applies to every comparison in this results store."
           className="run-panel"
         >
-          <div className="dataset-emblem">
-            <Database size={23} />
-            <div>
-              <strong>Adult Income</strong>
-              <span>Binary classification · Income &gt;50K</span>
-            </div>
-          </div>
-          <div className="split-labels">
-            <span>
-              Training <b>{(100 * (1 - data.config.test_size)).toFixed(0)}%</b>
-            </span>
-            <span>
-              Test <b>{(100 * data.config.test_size).toFixed(0)}%</b>
-            </span>
-          </div>
-          <div className="split-bar">
-            <span style={{ width: `${(1 - data.config.test_size) * 100}%` }} />
-          </div>
-          <div className="split-counts">
-            <span>{report.training_samples.toLocaleString()} samples</span>
-            <span>{report.test_samples.toLocaleString()} samples</span>
-          </div>
           <dl className="run-details">
+            <div>
+              <dt>Prediction target</dt>
+              <dd>Income &gt;50K</dd>
+            </div>
+            <div>
+              <dt>Held-out test split</dt>
+              <dd>{(100 * data.config.test_size).toFixed(0)}%</dd>
+            </div>
             <div>
               <dt>Random seed</dt>
               <dd>{data.config.random_seed}</dd>
@@ -289,6 +315,14 @@ export function Overview({
             <div>
               <dt>Mitigation target</dt>
               <dd>Gender</dd>
+            </div>
+            <div>
+              <dt>Group views</dt>
+              <dd>
+                {[...new Set(data.fairness.map((r) => r.sensitive_attribute))]
+                  .map((view) => viewNames[view] || view)
+                  .join(", ")}
+              </dd>
             </div>
             <div>
               <dt>Threshold constraint</dt>
@@ -304,88 +338,23 @@ export function Overview({
             </div>
           </dl>
           <button className="text-link" onClick={() => navigate("methodology")}>
-            Explore the methodology <ArrowRight size={15} />
+            Read the methodology <ArrowRight size={15} aria-hidden="true" />
           </button>
         </Panel>
       </div>
-      <Panel
-        title="Baseline benchmark"
-        subtitle="The starting point before applying mitigation."
-        action={
-          <button className="text-link" onClick={() => navigate("models")}>
-            Compare models <ArrowRight size={15} />
-          </button>
-        }
-      >
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>Accuracy</th>
-                <th>F1 score</th>
-                <th>ROC-AUC</th>
-                <th>Gender DP difference</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {baselines.map((row, index) => (
-                <tr key={row.model}>
-                  <td className="model-cell">
-                    <span className="model-index">0{index + 1}</span>
-                    {modelNames[row.model]}
-                  </td>
-                  <td>
-                    <div className="mini-value">
-                      {format(row.accuracy, true)}
-                      <i
-                        style={{
-                          width: valid(row.accuracy)
-                            ? `${row.accuracy * 70}px`
-                            : 0,
-                        }}
-                      />
-                    </div>
-                  </td>
-                  <td>{format(row.f1)}</td>
-                  <td>{format(row.roc_auc)}</td>
-                  <td>
-                    {format(
-                      data.fairness.find(
-                        (f) =>
-                          f.model === row.model &&
-                          f.mitigation_state === "baseline" &&
-                          f.sensitive_attribute === "gender",
-                      )?.demographic_parity_diff,
-                    )}
-                  </td>
-                  <td>
-                    <span className="badge">Baseline</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-      <div className="research-banner">
-        <div className="research-icon">
-          <FlaskConical size={24} />
-        </div>
+      <section className="research-finding">
         <div>
-          <span className="eyebrow">A CLOSER LOOK</span>
-          <h3>What happens beyond the target group?</h3>
+          <h2>Cross-group mitigation outcomes</h2>
           <p>
             {comparisons
               ? `${worsened} of ${comparisons} age and intersectional metric comparisons moved away from their ideal in this run.`
               : "Explore the age and intersectional outcomes of gender-targeted mitigation."}
           </p>
         </div>
-        <button className="button" onClick={() => navigate("effects")}>
-          Explore cross-group effects <ArrowRight size={16} />
+        <button className="text-link" onClick={() => navigate("effects")}>
+          View cross-group effects <ArrowRight size={16} aria-hidden="true" />
         </button>
-      </div>
+      </section>
     </>
   );
 }
@@ -409,7 +378,10 @@ export function PerformancePage({ data, selection: s }: Props) {
   return (
     <>
       <Filters data={data} selection={s} fields={["model", "state"]} />
-      <div className="stats-grid five">
+      <dl
+        className="metric-summary five"
+        aria-label="Selected model performance"
+      >
         {Object.entries(performanceNames).map(([key, name]) => (
           <Stat
             key={key}
@@ -418,7 +390,7 @@ export function PerformancePage({ data, selection: s }: Props) {
             detail={stateNames[s.state]}
           />
         ))}
-      </div>
+      </dl>
       <Panel
         title="Performance across interventions"
         subtitle={modelNames[s.model]}
@@ -445,8 +417,16 @@ export function PerformancePage({ data, selection: s }: Props) {
 }
 function PerformanceTable({ rows }: { rows: Results["performance"] }) {
   return (
-    <div className="table-scroll">
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label="Measured performance"
+      tabIndex={0}
+    >
       <table>
+        <caption className="sr-only">
+          Saved performance measurements by model and intervention
+        </caption>
         <thead>
           <tr>
             <th>Model</th>
@@ -487,7 +467,10 @@ export function FairnessPage({ data, selection: s }: Props) {
         selection={s}
         fields={["model", "state", "attribute", "metric"]}
       />
-      <div className="stats-grid">
+      <dl
+        className="metric-summary"
+        aria-label="Selected fairness measurements"
+      >
         {Object.entries(metricNames).map(([key, name]) => (
           <Stat
             key={key}
@@ -497,7 +480,7 @@ export function FairnessPage({ data, selection: s }: Props) {
             accent={key === s.metric}
           />
         ))}
-      </div>
+      </dl>
       <div className="notice">
         <Info size={17} />
         <span>
@@ -660,8 +643,16 @@ export function ModelsPage({ data, selection: s }: Props) {
         title="Model comparison"
         subtitle="A consistent test split across all three model families."
       >
-        <div className="table-scroll">
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="Model comparison"
+          tabIndex={0}
+        >
           <table>
+            <caption className="sr-only">
+              Model performance, disparity, and smallest demographic group
+            </caption>
             <thead>
               <tr>
                 <th>Model</th>
@@ -696,8 +687,17 @@ function ChangeTable({ rows }: { rows: Results["changes"] }) {
   if (!rows.length)
     return <Empty>No mitigation changes are stored for this selection.</Empty>;
   return (
-    <div className="table-scroll">
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label="Mitigation changes"
+      tabIndex={0}
+    >
       <table>
+        <caption className="sr-only">
+          Baseline and mitigated disparities with changes and direction relative
+          to the metric ideal
+        </caption>
         <thead>
           <tr>
             <th>Experiment / group view</th>
@@ -763,25 +763,28 @@ export function EffectsPage({ data, selection: s }: Props) {
       </div>
       {rows.length ? (
         <>
-          <div className="stats-grid three">
+          <dl
+            className="metric-summary three"
+            aria-label="Changes across group views"
+          >
             {rows.map((row) => (
-              <div className="stat-card" key={row.sensitive_attribute}>
-                <div className="stat-top">
+              <div className="metric-value" key={row.sensitive_attribute}>
+                <dt>
                   {viewNames[row.sensitive_attribute]}
-                  <span className="badge">
-                    {row.sensitive_attribute === "gender"
-                      ? "Target"
-                      : "Observed view"}
-                  </span>
-                </div>
-                <strong>{signed(row.distance_to_ideal_change)}</strong>
-                <Effect value={row.effect} />
-                <span className="stat-detail">
+                  {row.sensitive_attribute === "gender"
+                    ? " (mitigation target)"
+                    : ""}
+                </dt>
+                <dd>{signed(row.distance_to_ideal_change)}</dd>
+                <dd>
+                  <Effect value={row.effect} />
+                </dd>
+                <dd className="metric-detail">
                   {format(row.baseline_value)} → {format(row.mitigated_value)}
-                </span>
+                </dd>
               </div>
             ))}
-          </div>
+          </dl>
           <Panel
             title="Where do the effects appear?"
             subtitle="Change in distance to the metric ideal. Negative values indicate movement closer to the ideal."
@@ -843,9 +846,8 @@ export function MethodologyPage({ data }: { data: Results }) {
   return (
     <>
       <div className="method-intro">
-        <FlaskConical size={30} />
         <div>
-          <h2>One protocol. Multiple perspectives.</h2>
+          <h2>What this benchmark measures</h2>
           <p>
             FairLens compares established classifiers and mitigation methods on
             a historical income dataset. Different fairness definitions can
@@ -887,15 +889,17 @@ export function MethodologyPage({ data }: { data: Results }) {
         title="Four definitions of fairness"
         subtitle="No arbitrary composite fairness score."
       >
-        <div className="definition-grid">
+        <dl className="metric-definitions">
           {Object.entries(metricDescriptions).map(([key, text]) => (
-            <article key={key}>
-              <span className="badge">Ideal {ideal(key as FairnessKey)}</span>
-              <h3>{metricNames[key as FairnessKey]}</h3>
-              <p>{text}</p>
-            </article>
+            <div key={key}>
+              <dt>
+                {metricNames[key as FairnessKey]}
+                <span>Metric ideal: {ideal(key as FairnessKey)}</span>
+              </dt>
+              <dd>{text}</dd>
+            </div>
           ))}
-        </div>
+        </dl>
       </Panel>
       <Panel
         title="Interpretation and limitations"
@@ -925,7 +929,8 @@ export function MethodologyPage({ data }: { data: Results }) {
             The team is accountable for implementation, evaluation, assumptions,
             and documentation. Human interpretation is required. FairLens is for
             educational research and must not make real-world high-stakes
-            decisions. No personal user data is collected.
+            decisions. Uploaded datasets in the training workspace stay on the
+            local filesystem until manually removed; avoid personal identifiers.
           </p>
           <p>
             Threshold-adjusted ROC-AUC is calculated from the underlying

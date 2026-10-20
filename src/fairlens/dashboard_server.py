@@ -1,7 +1,6 @@
-"""Local, read-only HTTP bridge between the results store and React dashboard.
+"""Local React service: legacy saved results plus explicit dataset/training APIs.
 
-Only metric files are exposed. This module does not import the training pipeline
-or deserialize fitted models. The built frontend is served from its own directory.
+Viewing results never fits a model. Only a validated POST starts training.
 """
 from __future__ import annotations
 
@@ -14,6 +13,8 @@ import math
 import mimetypes
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+from fairlens.workspace import Workspace
+from fairlens.models.registry import model_catalog
 
 RESULT_FILES = {
     "performance": "performance_metrics.csv",
@@ -85,9 +86,10 @@ def read_results(directory: Path) -> dict:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    def __init__(self, *args, results_dir: Path, frontend_dir: Path, **kwargs):
+    def __init__(self, *args, results_dir: Path, frontend_dir: Path, workspace: Workspace, **kwargs):
         self.results_dir = results_dir
         self.frontend_dir = frontend_dir.resolve()
+        self.workspace = workspace
         super().__init__(*args, **kwargs)
 
     def _send(self, status: int, body: bytes, content_type: str, filename: str | None = None):
@@ -106,6 +108,33 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = unquote(urlsplit(self.path).path)
+        if path.startswith("/api/workspace/"):
+            try:
+                parts = path.removeprefix("/api/workspace/").split("/")
+                if parts == ["catalog"]:
+                    self._json(200, {"models": model_catalog(), "max_models": 7,
+                                     "limits": {"upload_mb": 20, "rows": 50000, "columns": 100}})
+                elif parts == ["datasets"]:
+                    self._json(200, {"datasets": self.workspace.datasets()})
+                elif len(parts) == 2 and parts[0] == "datasets":
+                    self._json(200, self.workspace.profile(parts[1]))
+                elif parts == ["runs"]:
+                    self._json(200, {"runs": self.workspace.runs()})
+                elif len(parts) == 2 and parts[0] == "runs":
+                    self._json(200, self.workspace.status(parts[1]))
+                elif len(parts) == 3 and parts[0] == "runs" and parts[2] == "results":
+                    self._json(200, self.workspace.result(parts[1]))
+                elif len(parts) == 4 and parts[0] == "runs" and parts[2] == "export":
+                    filename = parts[3]
+                    self._send(200, self.workspace.export(parts[1], filename),
+                               "application/json" if filename.endswith(".json") else "text/csv; charset=utf-8", filename)
+                else:
+                    self._json(404, {"error": "not_found"})
+            except FileNotFoundError:
+                self._json(404, {"message": "Dataset or experiment not found."})
+            except ValueError as error:
+                self._json(422, {"message": str(error)})
+            return
         if path == "/api/results":
             try:
                 self._json(200, read_results(self.results_dir))
@@ -139,7 +168,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
         content_type = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}.get(target.suffix)
         self._send(200, target.read_bytes(), content_type or mimetypes.guess_type(target.name)[0] or "application/octet-stream")
 
+    def do_POST(self):
+        """Same-origin JSON only: no cross-site form submissions or arbitrary code."""
+        host = self.headers.get("Host", "")
+        origin = self.headers.get("Origin")
+        if (host.split(":")[0] not in {"127.0.0.1", "localhost"}
+                or (origin is not None and origin not in {f"http://{host}", "http://127.0.0.1:5173", "http://localhost:5173"})
+                or self.headers.get_content_type() != "application/json"):
+            self._json(403, {"message": "Use the local FairLens interface with same-origin JSON requests."})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 42 * 1024 * 1024:
+                self._json(413, {"message": "Request too large. Upload a CSV no larger than 20 MB."})
+                return
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            path = urlsplit(self.path).path
+            if path == "/api/workspace/datasets":
+                self._json(201, self.workspace.upload(payload))
+            elif path == "/api/workspace/runs":
+                self._json(202, self.workspace.submit(payload))
+            else:
+                self._json(404, {"message": "Unknown endpoint."})
+        except FileNotFoundError:
+            self._json(404, {"message": "Select an existing uploaded dataset."})
+        except (ValueError, TypeError, UnicodeError) as error:
+            self._json(422, {"message": str(error) if isinstance(error, ValueError) else "Invalid request body."})
+        except RuntimeError as error:
+            self._json(409, {"message": str(error)})
+        except OSError:
+            self._json(500, {"message": "Unable to save local workspace files. Check available disk space and permissions."})
 
-def make_server(results_dir: Path, frontend_dir: Path, port: int = 8000) -> ThreadingHTTPServer:
-    handler = partial(DashboardHandler, results_dir=results_dir, frontend_dir=frontend_dir)
+
+def make_server(results_dir: Path, frontend_dir: Path, port: int = 8000, workspace_dir: Path | None = None) -> ThreadingHTTPServer:
+    workspace = Workspace(workspace_dir or results_dir.parent / "workspace")
+    handler = partial(DashboardHandler, results_dir=results_dir, frontend_dir=frontend_dir, workspace=workspace)
     return ThreadingHTTPServer(("127.0.0.1", port), handler)
